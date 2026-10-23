@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kampanj Kompis</title>
+<style>
+  :root { --bg:#fff; --fg:#111; --muted:#666; --card:#eee; --line:#999; --go:#1a7f37; --warn:#b42318; --blue:#0b5cad; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#121212; --fg:#f0f0f0; --muted:#9a9a9a; --card:#242424; --line:#666; --go:#2ea043; --warn:#e5534b; --blue:#388bfd; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--fg);
+         padding: 12px 16px 16px; padding-top: max(12px, env(safe-area-inset-top));
+         padding-bottom: max(16px, env(safe-area-inset-bottom));
+         max-width: 480px; margin: 0 auto; touch-action: manipulation; }
+
+  /* page header, right-aligned */
+  header { text-align: right; margin-bottom: 4px; }
+  header h1 { font-size: 26px; line-height: 1.1; margin: 0; }
+  header .sub { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
+  h2 { font-size: 20px; margin: 8px 0; }
+  label { display: block; margin: 16px 0 4px; font-weight: 600; }
+  input, select { width: 100%; font-size: 20px; padding: 12px; border-radius: 8px;
+                  border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+  button { font-size: 20px; padding: 14px; border-radius: 10px; border: 0; width: 100%; margin-top: 12px;
+           color: #fff; background: var(--blue); }
+  button.go { background: var(--go); }
+  button.warn { background: var(--warn); }
+  button.plain { background: var(--card); color: var(--fg); }
+
+  /* grid of passage buttons: one per label */
+  #marks { display: grid; gap: 10px; height: 46vh; min-height: 200px; grid-auto-rows: 1fr; touch-action: none; }
+  .mark { margin: 0; height: 100%; font-size: 26px; font-weight: 700; background: var(--go);
+          text-transform: capitalize; overflow: hidden; word-break: break-word; padding: 8px;
+          user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+  .mark.hit { filter: brightness(1.6); }
+
+  .info { margin: 4px 0; font-size: 18px; }
+  .count { font-size: 44px; font-weight: 700; margin: 6px 0 0; }
+  #recent { font-variant-numeric: tabular-nums; font-size: 18px; margin: 8px 0; padding-left: 0; list-style: none; }
+  .row { display: flex; gap: 12px; }
+  .hidden { display: none; }
+  #msg { min-height: 24px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Kampanj Kompis</h1>
+  <div class="sub">by Forgotit</div>
+</header>
+
+<!-- Screen 1: set up a new set -->
+<div id="setup">
+  <h2>Nytt pass</h2>
+  <label for="setName">Case</label>
+  <input id="setName" type="text" placeholder="e.g. 1001" autocomplete="off">
+  <label for="runner">Testperson</label>
+  <input id="runner" type="text" placeholder="" autocomplete="off">
+  <label for="object">Objekt för passagetider</label>
+  <select id="object"></select>
+  <div id="poleBox" class="hidden">
+    <label for="poles">Stolpnamn (separera med komma)</label>
+    <input id="poles" type="text" placeholder="t.ex. S1, S2, S3" autocomplete="off">
+  </div>
+  <button id="start" class="go">Börja passet</button>
+  <p id="setupMsg"></p>
+</div>
+
+<!-- Screen 2: log passes -->
+<div id="run" class="hidden">
+  <div class="info" id="runInfo"></div>
+  <div id="marks"></div>
+  <div class="count" id="count">0</div>
+  <ul id="recent"></ul>
+  <div class="row">
+    <button id="undo" class="plain">Gör om senaste</button>
+    <button id="finish" class="warn">Avsluta passet</button>
+  </div>
+</div>
+
+<!-- Screen 3: save -->
+<div id="done" class="hidden">
+  <h2>Pass avslutat</h2>
+  <div class="info" id="doneInfo"></div>
+  <button id="save" class="go">Spara / Dela fil</button>
+  <button id="back" class="plain">Tillbaka till passet</button>
+  <button id="newSet" class="plain">Påbörja ett nytt pass</button>
+  <div id="msg"></div>
+</div>
+
+<script>
+// ====== EDIT THIS to change categories and their buttons ======
+// Each category lists the buttons (labels) shown while logging.
+// null = the user types the labels (comma-separated) before starting the set.
+const CATEGORIES = {
+  "Fiber":               ["yttre", "inre"],
+  "Stolpe":              null,
+  "Underlag":            ["asfalt", "gräs", "jord", "grus"],
+  "Fram och tillbaka mot-från fiber": ["intill fiber 1", "intill fiber 2", "längst från fiber 1", "längst från fiber 2"]
+};
+// ==============================================================
+
+const STORE_KEY = "pass-logger-state-v2";
+let state = null; // { set, runner, object, labels: [..], startedMs, events: [{label, ms}] }
+
+const $ = id => document.getElementById(id);
+const pad = (n, w = 2) => String(n).padStart(w, "0");
+
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) + "." + pad(d.getMilliseconds(), 3);
+}
+function fmtDate(ms) {
+  const d = new Date(ms);
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+function tzOffset(ms) {
+  const m = -new Date(ms).getTimezoneOffset();
+  const s = m >= 0 ? "+" : "-";
+  return s + pad(Math.floor(Math.abs(m) / 60)) + ":" + pad(Math.abs(m) % 60);
+}
+
+function persist() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) {}
+}
+function restore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) state = JSON.parse(raw);
+  } catch (e) { state = null; }
+}
+function clearState() {
+  state = null;
+  try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+}
+
+function show(which) {
+  ["setup", "run", "done"].forEach(id => $(id).classList.toggle("hidden", id !== which));
+  if (which === "run") keepAwake();
+}
+
+// one button per label
+function renderMarks() {
+  const box = $("marks");
+  box.innerHTML = "";
+  box.style.gridTemplateColumns = "repeat(" + (state.labels.length <= 1 ? 1 : 2) + ", 1fr)";
+  state.labels.forEach(l => {
+    const b = document.createElement("button");
+    b.className = "mark";
+    b.dataset.label = l;
+    b.textContent = l;
+    box.appendChild(b);
+  });
+}
+
+function renderRun() {
+  $("runInfo").textContent = "Case " + state.set + " · " + state.object + (state.runner ? " · " + state.runner : "");
+  $("count").textContent = state.events.length;
+  const ul = $("recent");
+  ul.innerHTML = "";
+  const n = state.events.length;
+  state.events.slice(-5).reverse().forEach((ev, i) => {
+    const li = document.createElement("li");
+    li.textContent = "#" + (n - i) + "  " + ev.label + "  " + fmtTime(ev.ms);
+    ul.appendChild(li);
+  });
+}
+
+// ---- keep the screen on while logging ----
+let wakeLock = null;
+async function keepAwake() {
+  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("run").classList.contains("hidden")) keepAwake();
+});
+
+// ---- setup ----
+Object.keys(CATEGORIES).forEach(c => {
+  const o = document.createElement("option");
+  o.value = c; o.textContent = c;
+  $("object").appendChild(o);
+});
+function updatePoleBox() {
+  $("poleBox").classList.toggle("hidden", CATEGORIES[$("object").value] !== null);
+}
+$("object").addEventListener("change", updatePoleBox);
+updatePoleBox();
+
+$("start").addEventListener("click", () => {
+  const set = $("setName").value.trim();
+  if (!set) { $("setupMsg").textContent = "Fyll i ett case först."; return; }
+  const object = $("object").value;
+  let labels = CATEGORIES[object];
+  if (labels === null) {
+    labels = [...new Set($("poles").value.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean))];
+    if (!labels.length) { $("setupMsg").textContent = "Ange minst ett stolpnamn."; return; }
+  }
+  state = { set, runner: $("runner").value.trim(), object, labels: labels.slice(), startedMs: Date.now(), events: [] };
+  persist();
+  renderMarks();
+  renderRun();
+  show("run");
+});
+
+// ---- logging: pointerdown fires immediately on touch (no tap delay) ----
+$("marks").addEventListener("pointerdown", e => {
+  e.preventDefault();
+  const b = e.target.closest("button[data-label]");
+  if (!b) return;
+  state.events.push({ label: b.dataset.label, ms: Date.now() });
+  persist();
+  renderRun();
+  b.classList.add("hit");
+  setTimeout(() => b.classList.remove("hit"), 150);
+  if (navigator.vibrate) navigator.vibrate(30);
+});
+$("undo").addEventListener("click", () => {
+  if (state.events.length) { state.events.pop(); persist(); renderRun(); }
+});
+$("finish").addEventListener("click", () => {
+  $("doneInfo").textContent = "Case " + state.set + " · " + state.object + " · " + state.events.length + " passager";
+  $("msg").textContent = "";
+  show("done");
+});
+$("back").addEventListener("click", () => { renderRun(); show("run"); });
+$("newSet").addEventListener("click", () => {
+  if (!confirm("Påbörja ett nytt pass? Är du säker på att du sparat nuvarande?")) return;
+  clearState();
+  $("setName").value = "";
+  $("setupMsg").textContent = "";
+  show("setup");
+});
+
+// ---- save ----
+function buildFile() {
+  const t0 = state.events.length ? state.events[0].ms : state.startedMs;
+  // key for each event, e.g. "underlag", "fiber", "stolpe", "avstånd_från_objekt"
+  const key = state.object.toLowerCase().trim().replace(/\s+/g, "_");
+  const data = {
+    case: state.set,
+    passage: state.object,
+    testperson: state.runner,
+    date: fmtDate(t0),
+    utc_offset: tzOffset(t0),
+    passager: state.events.map(ev => ({
+      [key]: ev.label,
+      time_local: fmtTime(ev.ms)     // HH:MM:SS.mmm, phone local time
+    }))
+  };
+  const safe = s => String(s).replace(/[^\p{L}\p{N}_-]+/gu, "_");
+  const name = "case-" + safe(state.set) + "_" + safe(state.object) + (state.runner ? "_" + safe(state.runner) : "") + ".json";
+  return { name, text: JSON.stringify(data, null, 2) };
+}
+
+$("save").addEventListener("click", async () => {
+  const { name, text } = buildFile();
+  const file = new File([text], name, { type: "application/json" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: name });
+      $("msg").textContent = "Delad. Kontrollera att filen kom fram innan du startar ett nytt pass.";
+      return;
+    }
+  } catch (e) {
+    if (e && e.name === "AbortError") { $("msg").textContent = "Avbrutet. Tryck på Spara igen."; return; }
+  }
+  // Fallback: plain download
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  $("msg").textContent = "Nedladdad som " + name + ".";
+});
+
+// ---- resume an unfinished set after reload / crash ----
+restore();
+if (state && state.events && state.labels) { renderMarks(); renderRun(); show("run"); }
+else { clearState(); show("setup"); }
+</script>
+</body>
+</html>
