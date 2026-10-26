@@ -100,7 +100,7 @@ const CATEGORIES = {
   "Fiber":               ["yttre", "inre"],
   "Stolpe":              null,
   "Underlag":            ["asfalt", "gräs", "jord", "grus"],
-  "Fram och tillbaka mot-från fiber": ["intill fiber 1", "intill fiber 2", "längst från fiber 1", "längst från fiber 2"]
+  "Fram och tillbaka mot-från fiber": ["intill yttre fibern", "intill inre fibern", "längst från yttre fibern", "längst från inre fibern"]
 };
 // ==============================================================
 
@@ -155,6 +155,14 @@ function renderMarks() {
     b.textContent = l;
     box.appendChild(b);
   });
+  // For Fiber passages, add a single "vändning" button (knowledge of yttre/inre is implicit)
+  if (state.object === "Fiber") {
+    const v = document.createElement("button");
+    v.className = "mark";
+    v.dataset.label = "vändning";
+    v.textContent = "vändning";
+    box.appendChild(v);
+  }
 }
 
 function renderRun() {
