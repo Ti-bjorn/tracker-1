@@ -99,6 +99,7 @@
 const CATEGORIES = {
   "Fiber":               ["yttre", "inre"],
   "Stolpe":              null,
+  "Stafett":            null,
   "Underlag":            ["asfalt", "gräs", "jord", "grus"],
   "Fram och tillbaka mot-från fiber": ["intill yttre fibern", "intill inre fibern", "längst från yttre fibern", "längst från inre fibern"]
 };
@@ -194,7 +195,21 @@ Object.keys(CATEGORIES).forEach(c => {
   $("object").appendChild(o);
 });
 function updatePoleBox() {
-  $("poleBox").classList.toggle("hidden", CATEGORIES[$("object").value] !== null);
+  const obj = $("object").value;
+  const isCustom = CATEGORIES[obj] === null;
+  $("poleBox").classList.toggle("hidden", !isCustom);
+  // Update label text depending on the selected category
+  const label = document.querySelector('#poleBox label');
+  if (label) {
+    if (obj === "Stafett") {
+      label.textContent = "Deltagare i stafetten (separera med komma)";
+    } else if (obj === "Stolpe") {
+      label.textContent = "Stolpnamn (separera med komma)";
+    } else {
+      // fallback generic text
+      label.textContent = "Etiketter (separera med komma)";
+    }
+  }
 }
 $("object").addEventListener("change", updatePoleBox);
 updatePoleBox();
